@@ -1,0 +1,14 @@
+services:
+  nodex-node:
+    build: .
+    container_name: nodex-node
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "${NODE_PORT:-24443}:${NODE_PORT:-24443}/tcp"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env
