@@ -15,7 +15,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 echo -e "${CYAN}================================================${NC}"
-echo -e "${CYAN}   NodeXProtocol Edge Node (nodex-node v1.1)    ${NC}"
+echo -e "${CYAN}   NodeXProtocol Edge Node (nodex-node v1.2)    ${NC}"
 echo -e "${CYAN}   独立容器隔离部署 · 不影响宿主机 3x-ui 服务   ${NC}"
 echo -e "${CYAN}================================================${NC}"
 

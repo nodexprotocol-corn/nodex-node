@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import random
@@ -156,7 +157,27 @@ def get_public_ip() -> str:
     return ""
 
 
-def write_singbox_config(ident: dict, port: int, sni: str):
+def derive_epoch_ticket_uuid(node_secret_hash: str, epoch_id: int) -> str:
+    digest = hashlib.sha256(f"NodeX-Ticket-UUID:{node_secret_hash}:{epoch_id}".encode("utf-8")).hexdigest()
+    return f"{digest[0:8]}-{digest[8:12]}-4{digest[13:16]}-a{digest[17:20]}-{digest[20:32]}"
+
+
+def write_singbox_config(ident: dict, port: int, sni: str) -> int:
+    secret_hash = hashlib.sha256(ident["node_secret"].encode("utf-8")).hexdigest()
+    cur_epoch = int(time.time()) // 21600
+    epoch_uuids = [
+        derive_epoch_ticket_uuid(secret_hash, cur_epoch),
+        derive_epoch_ticket_uuid(secret_hash, cur_epoch - 1),
+        derive_epoch_ticket_uuid(secret_hash, cur_epoch + 1),
+        ident["uuid"],
+    ]
+    seen = set()
+    users_list = []
+    for u in epoch_uuids:
+        if u not in seen:
+            seen.add(u)
+            users_list.append({"uuid": u, "flow": "xtls-rprx-vision"})
+
     cfg = {
         "log": {"level": "error", "disabled": False},
         "inbounds": [
@@ -165,12 +186,7 @@ def write_singbox_config(ident: dict, port: int, sni: str):
                 "tag": "vless-in",
                 "listen": "0.0.0.0",
                 "listen_port": port,
-                "users": [
-                    {
-                        "uuid": ident["uuid"],
-                        "flow": "xtls-rprx-vision",
-                    }
-                ],
+                "users": users_list,
                 "tls": {
                     "enabled": True,
                     "server_name": sni,
@@ -197,6 +213,7 @@ def write_singbox_config(ident: dict, port: int, sni: str):
         },
     }
     SINGBOX_CFG.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    return cur_epoch
 
 
 def apply_tc_limit(mbps: int):
@@ -261,6 +278,7 @@ def register_node(cfg: dict, ident: dict, public_ip: str, active_sni: str) -> di
         "country": cfg["NODE_COUNTRY"] or None,
         "max_bw_mbps": cfg["MAX_BW_MBPS"],
         "max_monthly_gb": cfg["MAX_MONTHLY_GB"],
+        "ticket_auth": True,
     }
     try:
         r = httpx.post(f"{cfg['COORDINATOR_URL']}/api/v1/node/register", json=payload, timeout=15.0)
@@ -285,6 +303,7 @@ def report_heartbeat(cfg: dict, ident: dict, public_ip: str, used_mb: float, act
         "load_level": "green",
         "active_conns": 0,
         "is_online": is_online,
+        "ticket_auth": True,
     }
     try:
         r = httpx.post(f"{cfg['COORDINATOR_URL']}/api/v1/node/heartbeat", json=payload, timeout=12.0)
@@ -310,6 +329,8 @@ def main():
             "country": cfg["NODE_COUNTRY"] or "AUTO",
             "reality_sni": active_sni,
             "sni_rotate_hours": cfg["SNI_ROTATE_HOURS"],
+            "ticket_auth": "enabled (6h-epoch)",
+            "ticket_epoch": int(time.time()) // 21600,
             "max_bw_mbps": cfg["MAX_BW_MBPS"],
             "max_monthly_gb": cfg["MAX_MONTHLY_GB"],
             "used_monthly_mb": used_mb,
@@ -350,7 +371,7 @@ def main():
     active_sni, _ = resolve_active_sni(cfg, ident, force_rotate=False)
     save_identity(ident)
 
-    write_singbox_config(ident, cfg["NODE_PORT"], active_sni)
+    last_epoch = write_singbox_config(ident, cfg["NODE_PORT"], active_sni)
     reg_res = register_node(cfg, ident, public_ip, active_sni)
 
     effective_bw = cfg["MAX_BW_MBPS"]
@@ -406,12 +427,17 @@ def main():
         if force_sync:
             FORCE_SYNC_FLAG.unlink(missing_ok=True)
 
-        # 检查是否到达 SNI 自动轮换周期
+        # 检查是否到达 SNI 自动轮换周期 或 6h 动态 Ticket Epoch 窗口切换
         active_sni, sni_rotated = resolve_active_sni(cfg, ident, force_rotate=False)
-        if sni_rotated:
-            print(f"[SNI] 触发非大厂随机 SNI 轮换 -> {active_sni}", flush=True)
-            save_identity(ident)
-            write_singbox_config(ident, cfg["NODE_PORT"], active_sni)
+        cur_epoch = int(time.time()) // 21600
+        epoch_rotated = (cur_epoch != last_epoch)
+        if sni_rotated or epoch_rotated:
+            if sni_rotated:
+                print(f"[SNI] 触发非大厂随机 SNI 轮换 -> {active_sni}", flush=True)
+                save_identity(ident)
+            if epoch_rotated:
+                print(f"[TICKET] 切换至新 6h 票据周期 Epoch={cur_epoch}", flush=True)
+            last_epoch = write_singbox_config(ident, cfg["NODE_PORT"], active_sni)
             if sb_proc and sb_proc.poll() is None:
                 sb_proc.terminate()
                 try:
