@@ -15,7 +15,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 echo -e "${CYAN}================================================${NC}"
-echo -e "${CYAN}   NodeXProtocol Edge Node (nodex-node v1.0)    ${NC}"
+echo -e "${CYAN}   NodeXProtocol Edge Node (nodex-node v1.1)    ${NC}"
 echo -e "${CYAN}   独立容器隔离部署 · 不影响宿主机 3x-ui 服务   ${NC}"
 echo -e "${CYAN}================================================${NC}"
 
@@ -78,7 +78,8 @@ NODE_TAG=${NODE_TAG}
 MAX_BW_MBPS=${MAX_BW_MBPS}
 MAX_MONTHLY_GB=${MAX_MONTHLY_GB}
 IP_CHECK_INTERVAL_SEC=180
-REALITY_SNI=gateway.icloud.com
+REALITY_SNI=auto
+SNI_ROTATE_HOURS=24
 EOF
     echo -e "${GREEN}已生成配置文件 $NODE_DIR/.env${NC}"
 else
